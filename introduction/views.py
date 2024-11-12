@@ -201,19 +201,53 @@ class TestUser:
 pickled_user = pickle.dumps(TestUser())
 encoded_user = base64.b64encode(pickled_user)
 
+import base64
+import json
+import jsonschema
+from django.shortcuts import render, redirect
+
+# Schema for validating and deserializing the admin object.
+admin_schema = {
+    "type": "object",
+    "properties": {
+        "admin": {
+            "type": "integer",
+            "enum": [0, 1]
+        }
+    },
+    "required": ["admin"],
+    "additionalProperties": False
+}
+
+# Dummy encoded user to simulate the case when token is not available
+dummy_encoded_user = base64.b64encode(json.dumps({'admin': 0}).encode('utf-8'))
+
+
 def insec_des_lab(request):
     if request.user.is_authenticated:
-        response = render(request,'Lab/insec_des/insec_des_lab.html', {"message":"Only Admins can see this page"})
+        response = render(request, 'Lab/insec_des/insec_des_lab.html', {"message": "Only Admins can see this page"})
         token = request.COOKIES.get('token')
-        if token == None:
-            token = encoded_user
-            response.set_cookie(key='token',value=token.decode('utf-8'))
+
+        if token is None:
+            # Use the dummy encoded user as a fallback (non-admin user)
+            token = dummy_encoded_user
+            response.set_cookie(key='token', value=token.decode('utf-8'))
         else:
-            token = base64.b64decode(token)
-            admin = pickle.loads(token)
-            if admin.admin == 1:
-                response = render(request,'Lab/insec_des/insec_des_lab.html', {"message":"Welcome Admin, SECRETKEY:ADMIN123"})
-                return response
+            token = base64.b64decode(token).decode('utf-8')
+
+            try:
+                # Deserialize token with JSON safely
+                admin_data = json.loads(token)
+
+                # Validate the JSON data against the schema
+                jsonschema.validate(instance=admin_data, schema=admin_schema)
+
+                if admin_data['admin'] == 1:
+                    response = render(request, 'Lab/insec_des/insec_des_lab.html', {"message": "Welcome Admin, SECRETKEY:ADMIN123"})
+                    return response
+            except (json.JSONDecodeError, jsonschema.exceptions.ValidationError):
+                # Gracefully handle errors and stay on the default page
+                pass
 
         return response
     else:
@@ -247,19 +281,21 @@ def xxe_see(request):
 
 
 @csrf_exempt
-def xxe_parse(request):
+from defusedxml.pulldom import parseString
 
-    parser = make_parser()
-    parser.setFeature(feature_external_ges, True)
-    doc = parseString(request.body.decode('utf-8'), parser=parser)
+def xxe_parse(request):
+    doc = parseString(request.body.decode('utf-8'))
+    text = None
     for event, node in doc:
         if event == START_ELEMENT and node.tagName == 'text':
             doc.expandNode(node)
             text = node.toxml()
-    startInd = text.find('>')
-    endInd = text.find('<', startInd)
-    text = text[startInd + 1:endInd:]
-    p=comments.objects.filter(id=1).update(comment=text)
+    
+    if text is not None:
+        startInd = text.find('>')
+        endInd = text.find('<', startInd)
+        text = text[startInd + 1:endInd]
+        comments.objects.filter(id=1).update(comment=text)
 
     return render(request, 'Lab/XXE/xxe_lab.html')
 
@@ -406,6 +442,7 @@ def cmd(request):
     else:
         return redirect('login')
 @csrf_exempt
+import subprocess
 def cmd_lab(request):
     if request.user.is_authenticated:
         if(request.method=="POST"):
@@ -414,22 +451,19 @@ def cmd_lab(request):
             os=request.POST.get('os')
             print(os)
             if(os=='win'):
-                command="nslookup {}".format(domain)
+                command=["nslookup", domain]
             else:
-                command = "dig {}".format(domain)
+                command = ["dig", domain]
             
             try:
-                # output=subprocess.check_output(command,shell=True,encoding="UTF-8")
                 process = subprocess.Popen(
                     command,
-                    shell=True,
+                    shell=False,
                     stdout=subprocess.PIPE, 
                     stderr=subprocess.PIPE)
                 stdout, stderr = process.communicate()
                 data = stdout.decode('utf-8')
                 stderr = stderr.decode('utf-8')
-                # res = json.loads(data)
-                # print("Stdout\n" + data)
                 output = data + stderr
                 print(data + stderr)
             except:
@@ -449,10 +483,18 @@ def cmd_lab2(request):
             val=request.POST.get('val')
             
             print(val)
+            command_map = {
+                'command1': command1_function,
+                'command2': command2_function
+                # Add more command mappings as necessary
+            }
             try:
-                output = eval(val)
-            except:
-                output = "Something went wrong"
+                if val in command_map:
+                    output = command_map[val]()
+                else:
+                    output = "Invalid command"
+            except Exception as e:
+                output = f"Something went wrong: {str(e)}"
                 return render(request,'Lab/CMD/cmd_lab2.html',{"output":output})
             print("Output = ", output)
             return render(request,'Lab/CMD/cmd_lab2.html',{"output":output})
@@ -460,6 +502,8 @@ def cmd_lab2(request):
             return render(request, 'Lab/CMD/cmd_lab2.html')
     else:
         return redirect('login')
+
+# Assuming command1_function and command2_function are defined elsewhere in the application,
 
 #******************************************Broken Authentication**************************************************#
 
