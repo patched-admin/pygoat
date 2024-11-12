@@ -152,14 +152,29 @@ def mitre_top25(request):
         return render(request, 'mitre/mitre_top25.html')
 
 @authentication_decorator
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2, Type
+from cryptography.hazmat.backends import default_backend
+from base64 import urlsafe_b64encode
 def csrf_lab_login(request):
     if request.method == 'GET':
         return render(request, 'mitre/csrf_lab_login.html')
     elif request.method == 'POST':
         password = request.POST.get('password')
         username = request.POST.get('username')
-        password = md5(password.encode()).hexdigest()
-        User = CSRF_user_tbl.objects.filter(username=username, password=password)
+        salt = b'secure_salt'  # this should be a securely generated and stored salt
+        kdf = Argon2(
+            salt=salt,
+            time_cost=2,
+            memory_cost=65536,
+            parallelism=1,
+            hash_len=32,
+            type=Type.I,
+            backend=default_backend()
+        )
+        password_key = kdf.derive(password.encode())
+        password_hash = urlsafe_b64encode(password_key).decode('utf-8')
+
+        User = CSRF_user_tbl.objects.filter(username=username, password=password_hash)
         if User:
             payload ={
                 'username': username,
@@ -170,7 +185,7 @@ def csrf_lab_login(request):
             response = redirect("/mitre/9/lab/transaction")
             response.set_cookie('auth_cookiee', cookie)
             return response
-        else :
+        else:
             return redirect('/mitre/9/lab/login')
 
 @authentication_decorator
@@ -212,10 +227,27 @@ def csrf_transfer_monei_api(request,recipent,amount):
 
 # @authentication_decorator
 @csrf_exempt
+import ast
+from django.http import JsonResponse
+from django.shortcuts import redirect
+
+# Define a safe function to evaluate basic arithmetic expressions
+def safe_eval(expression):
+    # Only allow numbers and operators, reject all other characters
+    allowed_chars = '0123456789+-*/() '
+    if all(char in allowed_chars for char in expression):
+        try:
+            # Use ast.literal_eval to evaluate within a safe sandbox
+            return eval(compile(ast.parse(expression, mode='eval'), '', 'eval'), {'__builtins__': None}, {})
+        except Exception:
+            return 'Error'
+    else:
+        return "Invalid characters in expression"
+
 def mitre_lab_25_api(request):
     if request.method == "POST":
         expression = request.POST.get('expression')
-        result = eval(expression)
+        result = safe_eval(expression)
         return JsonResponse({'result': result})
     else:
         return redirect('/mitre/25/lab/')
@@ -229,8 +261,9 @@ def mitre_lab_25(request):
 def mitre_lab_17(request):
     return render(request, 'mitre/mitre_lab_17.html')
 
+import shlex
 def command_out(command):
-    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(shlex.split(command), shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return process.communicate()
     
 
