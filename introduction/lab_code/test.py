@@ -19,8 +19,15 @@ import subprocess
 
 import yaml
 
-stream = open('/home/fox/test.yaml', 'r')
-data = yaml.load(stream)
+try:
+    with open('/home/fox/test.yaml', 'r') as stream:
+        data = yaml.safe_load(stream)
+except yaml.YAMLError as e:
+    print(f"Error parsing YAML: {e}")
+    exit(1)
+except IOError as e:
+    print(f"Error reading file: {e}")
+    exit(1)
 
 '''
 stdout, stderr = data.communicate()

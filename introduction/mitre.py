@@ -240,8 +240,19 @@ def mitre_lab_17_api(request):
         ip = request.POST.get('ip')
         command = "nmap " + ip 
         res, err = command_out(command)
-        res = res.decode()
-        err = err.decode()
-        pattern = "STATE SERVICE.*\\n\\n"
-        ports = re.findall(pattern, res,re.DOTALL)[0][14:-2].split('\n')
-        return JsonResponse({'raw_res': str(res), 'raw_err': str(err), 'ports': ports})
+        
+        # Add type checking and error handling for decoding
+        try:
+            if isinstance(res, bytes):
+                res = res.decode()
+            if isinstance(err, bytes):
+                err = err.decode()
+        except UnicodeDecodeError as e:
+            return JsonResponse({'error': 'Failed to decode command output'}, status=500)
+            
+        try:
+            pattern = "STATE SERVICE.*\\n\\n"
+            ports = re.findall(pattern, res, re.DOTALL)[0][14:-2].split('\n')
+            return JsonResponse({'raw_res': str(res), 'raw_err': str(err), 'ports': ports})
+        except (IndexError, AttributeError) as e:
+            return JsonResponse({'error': 'Failed to parse command output'}, status=500)
