@@ -29,7 +29,16 @@ SENSITIVE_DATA = 'FLAGTHATNEEDSTOBEFOUND'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['pygoat.herokuapp.com', '0.0.0.0.']
+# Development vs Production configuration using environment variables
+if DEBUG:
+    ALLOWED_HOSTS = [
+        'localhost',
+        '127.0.0.1'
+    ]
+else:
+    ALLOWED_HOSTS = [
+        'pygoat.herokuapp.com'
+    ]
 
 
 # Application definition
