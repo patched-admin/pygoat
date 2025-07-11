@@ -248,20 +248,38 @@ def xxe_see(request):
 
 @csrf_exempt
 def xxe_parse(request):
-
-    parser = make_parser()
-    parser.setFeature(feature_external_ges, True)
-    doc = parseString(request.body.decode('utf-8'), parser=parser)
-    for event, node in doc:
-        if event == START_ELEMENT and node.tagName == 'text':
-            doc.expandNode(node)
-            text = node.toxml()
-    startInd = text.find('>')
-    endInd = text.find('<', startInd)
-    text = text[startInd + 1:endInd:]
-    p=comments.objects.filter(id=1).update(comment=text)
-
-    return render(request, 'Lab/XXE/xxe_lab.html')
+    try:
+        # Use defusedxml's parseString which has XXE protections enabled by default
+        from defusedxml.pulldom import parseString
+        
+        # Validate content type
+        if not request.content_type == 'application/xml':
+            return JsonResponse({'error': 'Invalid content type. Expected application/xml'}, status=400)
+            
+        # Add size limit check - 10KB should be more than enough for this example
+        if len(request.body) > 10240:  # 10KB limit
+            return JsonResponse({'error': 'XML content too large'}, status=400)
+            
+        doc = parseString(request.body.decode('utf-8'))
+        text = None
+        
+        for event, node in doc:
+            if event == START_ELEMENT and node.tagName == 'text':
+                doc.expandNode(node)
+                text = node.toxml()
+                
+        if text is None:
+            return JsonResponse({'error': 'Missing text element in XML'}, status=400)
+                
+        startInd = text.find('>')
+        endInd = text.find('<', startInd)
+        text = text[startInd + 1:endInd:]
+        
+        p = comments.objects.filter(id=1).update(comment=text)
+        return render(request, 'Lab/XXE/xxe_lab.html')
+        
+    except Exception as e:
+        return JsonResponse({'error': 'XML parsing error'}, status=400)
 
 def auth_home(request):
     return render(request,'Lab/AUTH/auth_home.html')
@@ -952,11 +970,41 @@ def ssrf_lab2(request):
 
     elif request.method == "POST":
         url = request.POST["url"]
+        
+        # Basic SSRF protection - only allow http/https schemes
+        if not url.startswith(('http://', 'https://')):
+            return render(request, "Lab/ssrf/ssrf_lab2.html", 
+                        {"error": "Invalid URL scheme. Only HTTP(S) is allowed."})
+        
         try:
-            response = requests.get(url)
-            return render(request, "Lab/ssrf/ssrf_lab2.html", {"response": response.content.decode()})
-        except:
-            return render(request, "Lab/ssrf/ssrf_lab2.html", {"error": "Invalid URL"})
+            # Add timeout and max size limit
+            response = requests.get(url, timeout=5, stream=True)
+            
+            # Validate content type
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('text/'):
+                return render(request, "Lab/ssrf/ssrf_lab2.html",
+                            {"error": "Only text content types are supported."})
+            
+            # Read with size limit (1MB)
+            content = response.raw.read(1024 * 1024)
+            if response.raw.read(1):  # Check if there's more content
+                return render(request, "Lab/ssrf/ssrf_lab2.html",
+                            {"error": "Response too large. Maximum size is 1MB."})
+            
+            # Send raw content to template without decoding
+            return render(request, "Lab/ssrf/ssrf_lab2.html", 
+                        {"response": content})
+            
+        except requests.exceptions.Timeout:
+            return render(request, "Lab/ssrf/ssrf_lab2.html",
+                        {"error": "Request timed out."})
+        except requests.exceptions.RequestException as e:
+            return render(request, "Lab/ssrf/ssrf_lab2.html",
+                        {"error": f"Failed to fetch URL: {str(e)}"})
+        except Exception as e:
+            return render(request, "Lab/ssrf/ssrf_lab2.html",
+                        {"error": "An unexpected error occurred."})
 #--------------------------------------- Server-side template injection --------------------------------------#
 
 def ssti(request):
